@@ -52,7 +52,7 @@ Steps 3 and 4 (`Intel`, `VoP`) are real USDC payments on Base mainnet — wallet
 ## Quickstart
 
 ```bash
-git clone https://github.com/untitledfinancial/dpx-agent
+git clone https://github.com/untitledfinancial/dpx-agent-public
 cd dpx-agent
 npm install
 cp .env.example .env
