@@ -21,6 +21,34 @@ Step 5 is sandbox by default — real oracle checks, real compliance, nothing on
 
 > **To go live:** set `SANDBOX=false` in `.env`. Fund the wallet with USDC on Base equal to the gross settlement amount. One line change.
 
+## Output
+
+```
+DPX Agent  0x71C7656EC7ab88b098defB751B7401B5f6d8976F
+
+⚠  Settlement in sandbox — oracle and compliance run live, nothing moves on-chain.
+
+Oracle     STABLE  (score: 91)
+           Yield curve normal, FX stress low. Conditions clear.
+
+Quote      $50,000 gross · 85 bps · $49,575 net
+           ID dpx_a1b2c3d4e5f6  (valid 300s)
+
+Intel      macro stress score: 14
+           Low systemic stress. Credit spreads tight, liquidity normal.
+
+VoP        NOT_REGISTERED · proceed: true
+           Wallet not in registry — no identity to verify.
+
+Settled    executed · oracle STABLE (91)
+           Sandbox — no on-chain tx.
+           Set SANDBOX=false in .env to go live.
+```
+
+Steps 3 and 4 (`Intel`, `VoP`) are real USDC payments on Base mainnet — wallet signs automatically on 402 response.
+
+---
+
 ## Quickstart
 
 ```bash
