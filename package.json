@@ -1,0 +1,20 @@
+{
+  "name": "dpx-agent",
+  "version": "0.1.0",
+  "description": "Full DPX settlement loop — oracle gate, x402 micropayments, VoP, settle.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx agent.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "viem": "^2.0.0",
+    "x402-fetch": "^1.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.19",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}
