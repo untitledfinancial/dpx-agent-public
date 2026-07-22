@@ -27,7 +27,7 @@ No API key. No account. No onboarding.
 | **Oracle gate** | 9-layer stability check across climate, macro, FX, geopolitical | Free |
 | **Quote** | Binding fee breakdown, valid 300s | Free |
 | **Buy intel** | x402 micropayment → live macro-stress score + AI reasoning | ~$0.001 USDC |
-| **Verify counterparty** | x402 micropayment → GLEIF registry + FATF R16 check | ~$0.001 USDC |
+| **Verify counterparty** | x402 micropayment → legal entity registry + FATF R16 check | ~$0.001 USDC |
 | **Settle** | Oracle-gated, compliance-screened settlement | Sandbox by default |
 
 Steps 3 and 4 are live x402 payments on Base mainnet — your wallet signs automatically on the 402 response.  
