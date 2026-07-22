@@ -12,9 +12,9 @@ oracle gate → quote → buy intel (x402) → verify counterparty → settle
 
 ## Why this exists
 
-Most AI agents hit a wall when they need to move money. You can reason, plan, and call APIs — but the payment step breaks the loop and sends it back to a human. DPX closes that gap.
+Most AI agents hit two walls when they need to move money: the payment itself, and the compliance layer that's legally required before the payment. You can reason, plan, and call APIs — but both steps send you back to a human. DPX closes both gaps.
 
-DPX is a settlement rail native to AI agents. It speaks MCP, x402, and REST. Compliance and stability checks run at the protocol level so your agent doesn't have to implement them. Every settlement is oracle-gated — the system holds automatically if global conditions are wrong.
+DPX is a settlement rail native to AI agents. Compliance runs at the protocol level — AML, sanctions, FATF R16 counterparty verification — so your agent doesn't build or maintain any of it. Stability checks gate every settlement automatically. Your agent just calls the endpoint and acts on the decision.
 
 No API key. No account. No onboarding.
 
@@ -24,14 +24,17 @@ No API key. No account. No onboarding.
 
 | Step | What happens | Cost |
 |---|---|---|
-| **Oracle gate** | 9-layer stability check across climate, macro, FX, geopolitical | Free |
-| **Quote** | Binding fee breakdown, valid 300s | Free |
+| **Oracle gate** | 9-layer stability check — climate, macro, FX, geopolitical. Halts automatically if conditions are wrong. | Free |
+| **Quote** | Binding fee breakdown, valid 300 seconds | Free |
+| **Compliance screen** | AML screening, sanctions check (OFAC/EU/UN), FATF R16 counterparty verification — runs before any funds move | Free via `flow_check` |
 | **Buy intel** | x402 micropayment → live macro-stress score + AI reasoning | ~$0.001 USDC |
-| **Verify counterparty** | x402 micropayment → legal entity registry + FATF R16 check | ~$0.001 USDC |
-| **Settle** | Oracle-gated, compliance-screened settlement | Sandbox by default |
+| **Verify counterparty** | x402 micropayment → legal entity registry + beneficial ownership check | ~$0.001 USDC |
+| **Settle** | Oracle-gated, compliance-screened, on-chain settlement | Sandbox by default |
 
-Steps 3 and 4 are live x402 payments on Base mainnet — your wallet signs automatically on the 402 response.  
-Step 5 is sandbox by default. One env var change goes live.
+Compliance runs on every execution — not as an afterthought, as a gate. Clean payments proceed automatically. Flagged payments halt before anything moves.
+
+Steps 4 and 5 are live x402 payments on Base mainnet — your wallet signs automatically on the 402 response.  
+Step 6 is sandbox by default. One env var change goes live.
 
 ---
 
