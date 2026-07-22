@@ -6,7 +6,7 @@ Every run:
   · x402 micropayment → counterparty VoP check          (real USDC on Base)
   · Settlement in sandbox by default (set SANDBOX=false to go live)
 
-pip install httpx python-dotenv
+pip install httpx python-dotenv eth-account
 cp .env.example .env  # add PRIVATE_KEY and RECIPIENT_ADDRESS
 python agent.py
 """
@@ -31,16 +31,84 @@ INTELLIGENCE_URL  = "https://intelligence.untitledfinancial.com"
 COMPLIANCE_URL    = "https://compliance.untitledfinancial.com"
 
 
+def _sign_x402(payment_details: dict) -> str:
+    """Sign an EIP-3009 transferWithAuthorization for x402 payment."""
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+    import time, secrets
+
+    account  = Account.from_key(PRIVATE_KEY)
+    valid_after  = int(time.time()) - 10
+    valid_before = int(time.time()) + 300
+    nonce = "0x" + secrets.token_hex(32)
+
+    # EIP-3009 transferWithAuthorization
+    accepts = payment_details.get("accepts", [{}])[0]
+    domain = {
+        "name":              accepts.get("extra", {}).get("name", "USD Coin"),
+        "version":           accepts.get("extra", {}).get("version", "2"),
+        "chainId":           8453,  # Base mainnet
+        "verifyingContract": accepts.get("asset"),
+    }
+    message = {
+        "from":         account.address,
+        "to":           accepts.get("payTo"),
+        "value":        int(accepts.get("maxAmountRequired", "1000")),
+        "validAfter":   valid_after,
+        "validBefore":  valid_before,
+        "nonce":        nonce,
+    }
+    # Encode and sign
+    structured = {
+        "types": {
+            "EIP712Domain": [
+                {"name": "name",              "type": "string"},
+                {"name": "version",           "type": "string"},
+                {"name": "chainId",           "type": "uint256"},
+                {"name": "verifyingContract", "type": "address"},
+            ],
+            "TransferWithAuthorization": [
+                {"name": "from",        "type": "address"},
+                {"name": "to",         "type": "address"},
+                {"name": "value",      "type": "uint256"},
+                {"name": "validAfter", "type": "uint256"},
+                {"name": "validBefore","type": "uint256"},
+                {"name": "nonce",      "type": "bytes32"},
+            ],
+        },
+        "primaryType": "TransferWithAuthorization",
+        "domain": domain,
+        "message": message,
+    }
+    signed = Account.sign_typed_data(account.key, full_message=structured)
+    payload = {
+        "x402Version": 1,
+        "scheme":      "exact",
+        "network":     "base",
+        "payload": {
+            "signature":   signed.signature.hex(),
+            "authorization": {
+                "from":        account.address,
+                "to":          accepts.get("payTo"),
+                "value":       str(int(accepts.get("maxAmountRequired", "1000"))),
+                "validAfter":  str(valid_after),
+                "validBefore": str(valid_before),
+                "nonce":       nonce,
+            },
+        },
+    }
+    import json, base64
+    return base64.b64encode(json.dumps(payload).encode()).decode()
+
+
 def x402_get(url: str) -> dict:
-    """GET with x402 payment handling. Requires PRIVATE_KEY for signing."""
-    # For full x402 signing, use the x402-py library or implement EIP-3009.
-    # This stub shows the flow — replace with your signing implementation.
     resp = httpx.get(url, timeout=15)
     if resp.status_code == 402:
-        raise NotImplementedError(
-            "x402 payment required. Install x402-py or sign EIP-3009 manually.\n"
-            f"Payment details: {resp.json()}"
-        )
+        if not PRIVATE_KEY:
+            print(f"[demo] x402 payment required for {url} — skipping (no PRIVATE_KEY)")
+            return {}
+        token = _sign_x402(resp.json())
+        resp  = httpx.get(url, headers={"X-PAYMENT": token}, timeout=15)
     resp.raise_for_status()
     return resp.json()
 
@@ -48,10 +116,11 @@ def x402_get(url: str) -> dict:
 def x402_post(url: str, body: dict) -> dict:
     resp = httpx.post(url, json=body, timeout=15)
     if resp.status_code == 402:
-        raise NotImplementedError(
-            "x402 payment required.\n"
-            f"Payment details: {resp.json()}"
-        )
+        if not PRIVATE_KEY:
+            print(f"[demo] x402 payment required for {url} — skipping (no PRIVATE_KEY)")
+            return {"result": "NOT_REGISTERED", "proceedSafe": True, "message": "[demo] skipped"}
+        token = _sign_x402(resp.json())
+        resp  = httpx.post(url, json=body, headers={"X-PAYMENT": token}, timeout=15)
     resp.raise_for_status()
     return resp.json()
 
