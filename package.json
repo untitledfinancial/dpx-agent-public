@@ -5,9 +5,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "tsx agent.ts"
+    "start": "tsx agent.ts",
+    "agentkit": "tsx agentkit-dpx.ts"
   },
   "dependencies": {
+    "@coinbase/agentkit": "^0.10.4",
     "dotenv": "^16.0.0",
     "viem": "^2.0.0",
     "x402-fetch": "^1.2.0"

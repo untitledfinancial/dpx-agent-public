@@ -100,6 +100,20 @@ See [`examples/`](./examples/) for LangGraph and CrewAI integrations.
 
 ---
 
+## Coinbase AgentKit
+
+Same loop, using AgentKit for the wallet layer instead of raw Viem:
+
+```bash
+npm run agentkit
+```
+
+Works with either a Coinbase CDP-managed wallet (set `CDP_API_KEY_ID` / `CDP_API_KEY_SECRET` / `CDP_WALLET_SECRET`) or your existing `PRIVATE_KEY` (Viem mode) — see `.env.example`. Note: the x402 micropayment step needs a raw signing key, so it's skipped in pure CDP mode without `PRIVATE_KEY` also set.
+
+Like `agent.ts`, settlement here is simulated — nothing moves on-chain yet in either sandbox or live mode. Going live for real needs one more piece: taking the execution params DPX returns (router address, token, amount, quoteId) and actually calling `approve()` + `router.settle()` with the wallet's own signer. That's not wired up here yet.
+
+---
+
 ## Use it as a building block
 
 This is a reference loop, not a finished product. Drop it into any agent that generates a payment obligation:
