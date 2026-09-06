@@ -24,7 +24,7 @@ No API key. No account. No onboarding.
 
 | Step | What happens | Cost |
 |---|---|---|
-| **Oracle gate** | 9-layer stability check — climate, macro, FX, geopolitical. Halts automatically if conditions are wrong. | Free |
+| **Oracle gate** | 10-layer stability check — climate, macro, FX, geopolitical. Halts automatically if conditions are wrong. | Free |
 | **Quote** | Binding fee breakdown, valid 300 seconds | Free |
 | **Compliance screen** | AML screening, sanctions check (OFAC/EU/UN), FATF R16 counterparty verification — runs before any funds move | Free via `flow_check` |
 | **Buy intel** | x402 micropayment → live macro-stress score + AI reasoning | ~$0.001 USDC |
@@ -150,7 +150,7 @@ If you're building with Claude Desktop or Cursor, use the MCP server instead of 
 }
 ```
 
-72 tools available natively: `settlement.quote`, `settlement.execute`, `compliance.screen`, `esg.score`, `search_docs`, and more. Your agent calls them like any other tool — no HTTP, no auth setup.
+29 tools available natively: `settlement.quote`, `settlement.execute`, `compliance.sfdr_screen`, `esg.score`, `oracle.stability`, and more. Your agent calls them like any other tool — no HTTP, no auth setup.
 
 ---
 
