@@ -6,9 +6,11 @@
   "type": "module",
   "scripts": {
     "start": "tsx agent.ts",
-    "agentkit": "tsx agentkit-dpx.ts"
+    "agentkit": "tsx agentkit-dpx.ts",
+    "circle": "tsx circle-dpx.ts"
   },
   "dependencies": {
+    "@circle-fin/developer-controlled-wallets": "^10.5.5",
     "@coinbase/agentkit": "^0.10.4",
     "dotenv": "^16.0.0",
     "viem": "^2.0.0",
