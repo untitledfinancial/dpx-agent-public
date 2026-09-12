@@ -8,10 +8,71 @@
  *
  * LIVE mode:
  *   Set PRIVATE_KEY and RECIPIENT_ADDRESS in .env, set SANDBOX=false.
- *   x402 payments use real USDC on Base mainnet.
+ *   x402 payments use real USDC on Base mainnet. DPX is sender-funded —
+ *   /settle authorizes and returns execution params but never broadcasts
+ *   anything itself, so this file signs and sends approve() +
+ *   router.settle() with PRIVATE_KEY's own wallet. Needs USDC (the
+ *   settlement amount) and a small amount of ETH on Base for gas
+ *   (~$0.002/settlement).
  */
 
 import 'dotenv/config';
+import { createWalletClient, createPublicClient, http, encodeFunctionData, parseAbi } from 'viem';
+import { base } from 'viem/chains';
+
+interface SettlementExecution {
+  routerAddress: string;
+  tokenAddress: string;
+  grossAmountRaw: string;
+  grossAmountUsd?: number;
+  recipient: string;
+  isCrossCurrency: boolean;
+  quoteIdBytes32: string;
+  abi: string[];
+}
+
+const ERC20_APPROVE_ABI = [{
+  name: 'approve', type: 'function', stateMutability: 'nonpayable',
+  inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }],
+  outputs: [{ name: '', type: 'bool' }],
+}] as const;
+
+/** Signs and broadcasts approve() + router.settle() with PRIVATE_KEY's own wallet. */
+async function executeSettlementOnChain(
+  privateKey: `0x${string}`,
+  execution: SettlementExecution,
+): Promise<{ approveTxHash: string; settleTxHash: string }> {
+  const { privateKeyToAccount } = await import('viem/accounts');
+  const account      = privateKeyToAccount(privateKey);
+  const walletClient  = createWalletClient({ account, chain: base, transport: http() });
+  const publicClient  = createPublicClient({ chain: base, transport: http() });
+
+  const approveTxHash = await walletClient.sendTransaction({
+    to:   execution.tokenAddress as `0x${string}`,
+    data: encodeFunctionData({
+      abi: ERC20_APPROVE_ABI, functionName: 'approve',
+      args: [execution.routerAddress as `0x${string}`, BigInt(execution.grossAmountRaw)],
+    }),
+  });
+  await publicClient.waitForTransactionReceipt({ hash: approveTxHash });
+
+  const settleTxHash = await walletClient.sendTransaction({
+    to:   execution.routerAddress as `0x${string}`,
+    data: encodeFunctionData({
+      abi: parseAbi(execution.abi as [string, ...string[]]), functionName: 'settle',
+      args: [
+        execution.recipient as `0x${string}`,
+        BigInt(execution.grossAmountRaw),
+        execution.isCrossCurrency,
+        execution.quoteIdBytes32 as `0x${string}`,
+        execution.tokenAddress as `0x${string}`,
+      ],
+    }),
+  });
+  await publicClient.waitForTransactionReceipt({ hash: settleTxHash });
+
+  return { approveTxHash, settleTxHash };
+}
 
 const DEMO        = !process.env.PRIVATE_KEY;
 const SANDBOX     = process.env.SANDBOX !== 'false';
@@ -107,7 +168,7 @@ async function run() {
     return;
   }
 
-  const settled = await (SANDBOX ? fetch : fetch)('https://agent.untitledfinancial.com/settle', {
+  const settled = await fetch('https://agent.untitledfinancial.com/settle', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -123,11 +184,28 @@ async function run() {
   }).then(r => r.json()) as any;
 
   console.log(`Settled    ${settled.status} · oracle ${settled.oracleStatus} (${settled.oracleScore})`);
-  if (settled.txHash) {
-    console.log(`On-chain   https://base.blockscout.com/tx/${settled.txHash}`);
-  } else {
+
+  // DPX is sender-funded: /settle authorizes but never broadcasts anything
+  // itself. status === 'authorized' + a real execution object means it's
+  // now on us to sign and send approve() + router.settle() ourselves.
+  if (settled.status === 'authorized' && settled.execution) {
+    console.log('           Authorized — executing on-chain with this wallet...');
+    try {
+      const { approveTxHash, settleTxHash } = await executeSettlementOnChain(
+        PRIVATE_KEY!,
+        settled.execution as SettlementExecution,
+      );
+      console.log(`approve()  https://base.blockscout.com/tx/${approveTxHash}`);
+      console.log(`settle()   https://base.blockscout.com/tx/${settleTxHash}`);
+    } catch (e) {
+      console.log(`✗ On-chain execution failed: ${(e as Error).message}`);
+      console.log('  Common causes: wallet lacks USDC or ETH-for-gas on Base mainnet.');
+    }
+  } else if (settled.status === 'sandbox') {
     console.log('           Sandbox — no on-chain tx.');
     console.log('           Set SANDBOX=false in .env to go live.');
+  } else {
+    console.log(`           Not authorized — ${settled.reasoning ?? 'see full response for details'}`);
   }
 }
 

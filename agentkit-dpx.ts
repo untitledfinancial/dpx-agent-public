@@ -4,11 +4,14 @@
  * Demonstrates a Coinbase AgentKit agent using DPX as its payment and compliance rail.
  * AgentKit handles the wallet layer; DPX handles discovery, pricing, compliance, and settlement.
  *
- * Like agent.ts, x402 payments and settlement are simulated here — nothing
- * moves on-chain. Going live additionally needs the settlement step to take
- * DPX's returned execution params (router address, token, amount, quoteId)
- * and actually call approve() + router.settle() with the wallet's own
- * signer — that step isn't wired up yet in this file.
+ * DPX is sender-funded: POST /settle authorizes and returns execution params
+ * (router address, token, amount, quoteId, ABI) but does not broadcast
+ * anything itself — the caller signs and sends approve() + router.settle()
+ * with their own wallet. That step is wired up below via the AgentKit
+ * wallet provider's sendTransaction()/waitForTransactionReceipt() — it
+ * works identically whether the wallet is CDP-managed or a raw Viem key.
+ * Requires the wallet to hold both USDC (the settlement amount) and a small
+ * amount of ETH on Base for gas (~$0.002 per settlement).
  *
  * Two wallet modes:
  *   CDP mode  — set CDP_API_KEY_ID + CDP_API_KEY_SECRET + CDP_WALLET_SECRET
@@ -20,8 +23,8 @@
  *   RECIPIENT_NAME     — counterparty name (VoP check)
  *   AMOUNT_USD         — settlement amount (default: 50000)
  *   SANDBOX            — true = no on-chain tx (default); false requests live
- *                        settlement, but see note above — on-chain execution
- *                        isn't wired up in this file yet
+ *                        settlement and executes approve() + router.settle()
+ *                        on-chain with this wallet — needs real USDC + ETH
  *
  * CDP env vars (optional — enables Coinbase-managed wallet):
  *   CDP_API_KEY_ID     — from portal.cdp.coinbase.com
@@ -35,8 +38,76 @@ import 'dotenv/config';
 import { AgentKit, ViemWalletProvider, CdpEvmWalletProvider } from '@coinbase/agentkit';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
-import { createWalletClient, http } from 'viem';
+import { createWalletClient, http, encodeFunctionData, parseAbi } from 'viem';
 import { createSigner, wrapFetchWithPayment } from 'x402-fetch';
+
+interface SettlementExecution {
+  routerAddress: string;
+  tokenAddress: string;
+  grossAmountRaw: string;
+  grossAmountUsd?: number;
+  recipient: string;
+  isCrossCurrency: boolean;
+  quoteIdBytes32: string;
+  abi: string[];
+}
+
+const ERC20_APPROVE_ABI = [{
+  name: 'approve', type: 'function', stateMutability: 'nonpayable',
+  inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }],
+  outputs: [{ name: '', type: 'bool' }],
+}] as const;
+
+/**
+ * Signs and broadcasts approve() + router.settle() with the AgentKit wallet
+ * provider's own signer — works for both CDP-managed and Viem wallets since
+ * both implement the same EvmWalletProvider interface. Waits for each
+ * confirmation before sending the next transaction (settle() will revert if
+ * the approval hasn't landed yet).
+ */
+async function executeSettlementOnChain(
+  walletProvider: ViemWalletProvider | CdpEvmWalletProvider,
+  execution: SettlementExecution,
+): Promise<{ approveTxHash: string; settleTxHash: string }> {
+  const approveData = encodeFunctionData({
+    abi: ERC20_APPROVE_ABI,
+    functionName: 'approve',
+    args: [execution.routerAddress as `0x${string}`, BigInt(execution.grossAmountRaw)],
+  });
+  const approveTxHash = await walletProvider.sendTransaction({
+    to: execution.tokenAddress as `0x${string}`,
+    data: approveData,
+  });
+  await walletProvider.waitForTransactionReceipt(approveTxHash);
+
+  // execution.abi is the router's own ABI fragment as returned by DPX —
+  // routerInterface human-readable strings parse directly via viem's ABI
+  // item format for a single function, so we build the call with the raw
+  // router ABI DPX supplied rather than re-declaring it here.
+  const settleData = encodeFunctionData({
+    abi: parseRouterAbi(execution.abi),
+    functionName: 'settle',
+    args: [
+      execution.recipient as `0x${string}`,
+      BigInt(execution.grossAmountRaw),
+      execution.isCrossCurrency,
+      execution.quoteIdBytes32 as `0x${string}`,
+      execution.tokenAddress as `0x${string}`,
+    ],
+  });
+  const settleTxHash = await walletProvider.sendTransaction({
+    to: execution.routerAddress as `0x${string}`,
+    data: settleData,
+  });
+  await walletProvider.waitForTransactionReceipt(settleTxHash);
+
+  return { approveTxHash, settleTxHash };
+}
+
+/** Parses the human-readable ABI strings DPX returns (e.g. "function settle(...)") into viem's ABI item format. */
+function parseRouterAbi(abiStrings: string[]) {
+  return parseAbi(abiStrings as [string, ...string[]]);
+}
 
 const SANDBOX      = process.env.SANDBOX !== 'false';
 const FORCE_ORACLE = process.env.FORCE_ORACLE === 'true';
@@ -214,10 +285,27 @@ async function run() {
     console.log(`Reference    ${referenceId}`);
     if (settled.settlementId) console.log(`Settlement   ${settled.settlementId}`);
     if (settled.paymentId)    console.log(`Payment ID   ${settled.paymentId}`);
-    if (settled.txHash) {
-      console.log(`On-chain     https://base.blockscout.com/tx/${settled.txHash}`);
+
+    // DPX is sender-funded: /settle authorizes but never broadcasts anything
+    // itself. status === 'authorized' + a real execution object means it's
+    // now on us to sign and send approve() + router.settle() ourselves.
+    if (settled.status === 'authorized' && settled.execution) {
+      console.log(`             Authorized — executing on-chain with this wallet...`);
+      try {
+        const { approveTxHash, settleTxHash } = await executeSettlementOnChain(
+          walletProvider!,
+          settled.execution as SettlementExecution,
+        );
+        console.log(`approve()    https://base.blockscout.com/tx/${approveTxHash}`);
+        console.log(`settle()     https://base.blockscout.com/tx/${settleTxHash}`);
+      } catch (e) {
+        console.log(`✗ On-chain execution failed: ${(e as Error).message}`);
+        console.log(`  Common causes: wallet lacks USDC or ETH-for-gas on Base mainnet.`);
+      }
+    } else if (settled.status === 'sandbox') {
+      console.log(`             Sandbox — no on-chain tx (set SANDBOX=false to execute for real)`);
     } else {
-      console.log(`             Sandbox — no on-chain tx`);
+      console.log(`             Not authorized — ${settled.reasoning ?? 'see full response for details'}`);
     }
     console.log();
   }
