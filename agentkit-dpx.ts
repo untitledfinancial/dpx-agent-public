@@ -38,7 +38,7 @@ import 'dotenv/config';
 import { AgentKit, ViemWalletProvider, CdpEvmWalletProvider } from '@coinbase/agentkit';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
-import { createWalletClient, http, encodeFunctionData, parseAbi } from 'viem';
+import { createWalletClient, http, encodeFunctionData } from 'viem';
 import { createSigner, wrapFetchWithPayment } from 'x402-fetch';
 
 interface SettlementExecution {
@@ -56,6 +56,24 @@ const ERC20_APPROVE_ABI = [{
   name: 'approve', type: 'function', stateMutability: 'nonpayable',
   inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }],
   outputs: [{ name: '', type: 'bool' }],
+}] as const;
+
+// Hardcoded rather than parsed from execution.abi at runtime — parsing a
+// widened `string[]` (as opposed to a const tuple of literal strings) loses
+// the literal-type information encodeFunctionData's generic needs to infer
+// functionName/args, which silently collapses to `never` and fails to
+// typecheck. The router's settle() signature is fixed; DPX's own
+// settlement-agent source confirms this exact string every time.
+const ROUTER_SETTLE_ABI = [{
+  name: 'settle', type: 'function', stateMutability: 'nonpayable',
+  inputs: [
+    { name: 'recipient', type: 'address' },
+    { name: 'grossAmount', type: 'uint256' },
+    { name: 'isCrossCurrency', type: 'bool' },
+    { name: 'quoteId', type: 'bytes32' },
+    { name: 'tokenAddress', type: 'address' },
+  ],
+  outputs: [{ name: 'netAmount', type: 'uint256' }],
 }] as const;
 
 /**
@@ -80,12 +98,8 @@ async function executeSettlementOnChain(
   });
   await walletProvider.waitForTransactionReceipt(approveTxHash);
 
-  // execution.abi is the router's own ABI fragment as returned by DPX —
-  // routerInterface human-readable strings parse directly via viem's ABI
-  // item format for a single function, so we build the call with the raw
-  // router ABI DPX supplied rather than re-declaring it here.
   const settleData = encodeFunctionData({
-    abi: parseRouterAbi(execution.abi),
+    abi: ROUTER_SETTLE_ABI,
     functionName: 'settle',
     args: [
       execution.recipient as `0x${string}`,
@@ -102,11 +116,6 @@ async function executeSettlementOnChain(
   await walletProvider.waitForTransactionReceipt(settleTxHash);
 
   return { approveTxHash, settleTxHash };
-}
-
-/** Parses the human-readable ABI strings DPX returns (e.g. "function settle(...)") into viem's ABI item format. */
-function parseRouterAbi(abiStrings: string[]) {
-  return parseAbi(abiStrings as [string, ...string[]]);
 }
 
 const SANDBOX      = process.env.SANDBOX !== 'false';

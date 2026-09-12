@@ -17,7 +17,7 @@
  */
 
 import 'dotenv/config';
-import { createWalletClient, createPublicClient, http, encodeFunctionData, parseAbi } from 'viem';
+import { createWalletClient, createPublicClient, http, encodeFunctionData } from 'viem';
 import { base } from 'viem/chains';
 
 interface SettlementExecution {
@@ -37,6 +37,24 @@ const ERC20_APPROVE_ABI = [{
   outputs: [{ name: '', type: 'bool' }],
 }] as const;
 
+// Hardcoded rather than parsed from execution.abi at runtime — parsing a
+// widened `string[]` (as opposed to a const tuple of literal strings) loses
+// the literal-type information encodeFunctionData's generic needs to infer
+// functionName/args, which silently collapses to `never` and fails to
+// typecheck. The router's settle() signature is fixed; DPX's own
+// settlement-agent source confirms this exact string every time.
+const ROUTER_SETTLE_ABI = [{
+  name: 'settle', type: 'function', stateMutability: 'nonpayable',
+  inputs: [
+    { name: 'recipient', type: 'address' },
+    { name: 'grossAmount', type: 'uint256' },
+    { name: 'isCrossCurrency', type: 'bool' },
+    { name: 'quoteId', type: 'bytes32' },
+    { name: 'tokenAddress', type: 'address' },
+  ],
+  outputs: [{ name: 'netAmount', type: 'uint256' }],
+}] as const;
+
 /** Signs and broadcasts approve() + router.settle() with PRIVATE_KEY's own wallet. */
 async function executeSettlementOnChain(
   privateKey: `0x${string}`,
@@ -47,7 +65,17 @@ async function executeSettlementOnChain(
   const walletClient  = createWalletClient({ account, chain: base, transport: http() });
   const publicClient  = createPublicClient({ chain: base, transport: http() });
 
+  // NOTE: strict `tsc` may still report "Property 'kzg' is missing" here
+  // even with type: 'eip1559' pinned — a known viem type-definition false
+  // positive (numerous open viem GitHub issues on sendTransaction + local
+  // account demanding EIP-4844's kzg field on non-blob transactions). Does
+  // not affect runtime behavior: this file runs via `tsx`, which transpiles
+  // without typechecking. Left the explicit `type` in since it's correct
+  // and harmless either way.
   const approveTxHash = await walletClient.sendTransaction({
+    account,
+    chain: base,
+    type: 'eip1559',
     to:   execution.tokenAddress as `0x${string}`,
     data: encodeFunctionData({
       abi: ERC20_APPROVE_ABI, functionName: 'approve',
@@ -57,9 +85,12 @@ async function executeSettlementOnChain(
   await publicClient.waitForTransactionReceipt({ hash: approveTxHash });
 
   const settleTxHash = await walletClient.sendTransaction({
+    account,
+    chain: base,
+    type: 'eip1559',
     to:   execution.routerAddress as `0x${string}`,
     data: encodeFunctionData({
-      abi: parseAbi(execution.abi as [string, ...string[]]), functionName: 'settle',
+      abi: ROUTER_SETTLE_ABI, functionName: 'settle',
       args: [
         execution.recipient as `0x${string}`,
         BigInt(execution.grossAmountRaw),
