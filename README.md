@@ -1,30 +1,68 @@
-# dpx-agent
+# DPX Agent
 
-A working agent that runs the full DPX settlement loop. Fork it, run it — every run generates real traceable calls on Base.
+**Your AI agent, with payments.**
+
+Fork this. Run it. Your agent will check global conditions, get a binding fee quote, pay for live intelligence via x402, verify the counterparty, and settle — all without a human in the loop.
 
 ```
-check conditions → quote → buy macro data (x402) → verify counterparty (x402) → settle
+oracle gate → quote → buy intel (x402) → verify counterparty → settle
 ```
 
-## What runs live on every execution
+---
 
-| Step | Call | Cost |
+## Why this exists
+
+Most AI agents hit two walls when they need to move money: the payment itself, and the compliance layer that's legally required before the payment. You can reason, plan, and call APIs — but both steps send you back to a human. DPX closes both gaps.
+
+DPX is a settlement rail native to AI agents. Compliance runs at the protocol level — AML, sanctions, FATF R16 counterparty verification — so your agent doesn't build or maintain any of it. Stability checks gate every settlement automatically. Your agent just calls the endpoint and acts on the decision.
+
+No API key. No account. No onboarding.
+
+---
+
+## What runs on every execution
+
+| Step | What happens | Cost |
 |---|---|---|
-| Oracle check | Stability conditions across 10 signal layers | Free |
-| Quote | Binding fee breakdown | Free |
-| Buy macro-stress data | x402 micropayment → current conditions score + reasoning | USDC on Base |
-| Verify counterparty | x402 micropayment → GLEIF registry check, FATF R16 | $0.075 USDC |
-| Settle | Oracle-gated, compliance-screened settlement | **Sandbox by default** |
+| **Oracle gate** | 10-layer stability check — climate, macro, FX, geopolitical. Halts automatically if conditions are wrong. | Free |
+| **Quote** | Binding fee breakdown, valid 300 seconds | Free |
+| **Compliance screen** | AML screening, sanctions check (OFAC/EU/UN), FATF R16 counterparty verification — runs before any funds move | Free via `flow_check` |
+| **Buy intel** | x402 micropayment → live macro-stress score + AI reasoning | ~$0.001 USDC |
+| **Verify counterparty** | x402 micropayment → legal entity registry + beneficial ownership check | ~$0.001 USDC |
+| **Settle** | Oracle-gated, compliance-screened, on-chain settlement | Sandbox by default |
 
-Steps 3 and 4 are live x402 payments on Base mainnet every time the agent runs.  
-Step 5 is sandbox by default — real oracle checks, real compliance, nothing on-chain.
+Compliance runs on every execution — not as an afterthought, as a gate. Clean payments proceed automatically. Flagged payments halt before anything moves.
 
-> **To go live:** set `SANDBOX=false` in `.env`. Fund the wallet with USDC on Base equal to the gross settlement amount. One line change.
+Steps 4 and 5 are live x402 payments on Base mainnet — your wallet signs automatically on the 402 response.  
+Step 6 is sandbox by default. One env var change goes live.
 
-## Output
+---
+
+## Quickstart
+
+```bash
+git clone https://github.com/untitledfinancial/dpx-agent-public
+cd dpx-agent-public
+npm install
+cp .env.example .env
+```
+
+Edit `.env`:
+```
+PRIVATE_KEY=0x...         # Base wallet private key (needs small USDC balance)
+RECIPIENT_ADDRESS=0x...   # Destination wallet
+AMOUNT_USD=50000          # Settlement amount in USD
+SANDBOX=true              # Change to false for live on-chain settlement
+```
+
+```bash
+npm start
+```
+
+Output:
 
 ```
-DPX Agent  0x71C7656EC7ab88b098defB751B7401B5f6d8976F
+DPX Agent  0x1234567890123456789012345678901234567890
 
 ⚠  Settlement in sandbox — oracle and compliance run live, nothing moves on-chain.
 
@@ -38,35 +76,117 @@ Intel      macro stress score: 14
            Low systemic stress. Credit spreads tight, liquidity normal.
 
 VoP        NOT_REGISTERED · proceed: true
-           Wallet not in registry — no identity to verify.
+           Wallet not in registry — no identity issue flagged.
 
 Settled    executed · oracle STABLE (91)
            Sandbox — no on-chain tx.
            Set SANDBOX=false in .env to go live.
 ```
 
-Steps 3 and 4 (`Intel`, `VoP`) are real USDC payments on Base mainnet — wallet signs automatically on 402 response.
+**To go live:** set `SANDBOX=false`. Fund your wallet with USDC on Base equal to the gross settlement amount.
 
 ---
 
-## Quickstart
+## Python version
+
+Same loop, works with any Python agent framework:
 
 ```bash
-git clone https://github.com/untitledfinancial/dpx-agent-public
-cd dpx-agent
-npm install
-cp .env.example .env
-# add PRIVATE_KEY and RECIPIENT_ADDRESS to .env
-npm start
+pip install httpx python-dotenv
+python agent.py
 ```
 
-Your wallet needs a small USDC balance on Base for the x402 calls in steps 3 and 4.
+See [`examples/`](./examples/) for LangGraph and CrewAI integrations.
+
+---
+
+## Coinbase AgentKit
+
+Same loop, using AgentKit for the wallet layer instead of raw Viem:
+
+```bash
+npm run agentkit
+```
+
+Works with either a Coinbase CDP-managed wallet (set `CDP_API_KEY_ID` / `CDP_API_KEY_SECRET` / `CDP_WALLET_SECRET`) or your existing `PRIVATE_KEY` (Viem mode) — see `.env.example`. Note: the x402 micropayment step needs a raw signing key, so it's skipped in pure CDP mode without `PRIVATE_KEY` also set.
+
+Like `agent.ts`, settlement here is simulated — nothing moves on-chain yet in either sandbox or live mode. Going live for real needs one more piece: taking the execution params DPX returns (router address, token, amount, quoteId) and actually calling `approve()` + `router.settle()` with the wallet's own signer. That's not wired up here yet.
+
+---
+
+## Use it as a building block
+
+This is a reference loop, not a finished product. Drop it into any agent that generates a payment obligation:
+
+```typescript
+import { runSettlement } from './agent';
+
+const result = await runSettlement({
+  amount: invoiceAmount,
+  recipient: supplierWallet,
+  sandbox: false,
+});
+
+if (result.txHash) {
+  // Payment confirmed on Base mainnet
+  console.log(`https://base.blockscout.com/tx/${result.txHash}`);
+}
+```
+
+---
+
+## MCP — Claude Desktop and Cursor
+
+If you're building with Claude Desktop or Cursor, use the MCP server instead of the REST API:
+
+```json
+{
+  "mcpServers": {
+    "dpx": {
+      "command": "npx",
+      "args": ["@untitledfinancial/dpx-mcp"]
+    }
+  }
+}
+```
+
+29 tools available natively: `settlement.quote`, `settlement.execute`, `compliance.sfdr_screen`, `esg.score`, `oracle.stability`, and more. Your agent calls them like any other tool — no HTTP, no auth setup.
+
+---
+
+## What x402 is
+
+Steps 3 and 4 use [HTTP 402](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402) — the payment standard built for AI agents. When a server returns 402, the client signs a USDC transfer on Base and retries. The `x402-fetch` library handles this automatically:
+
+```typescript
+import { wrapFetchWithPayment } from 'x402-fetch';
+const fetchX402 = wrapFetchWithPayment(fetch, signer);
+
+// Pays automatically if server returns 402
+const data = await fetchX402('https://intelligence.untitledfinancial.com/v1/intelligence/macro-stress');
+```
+
+No manual payment flow. No out-of-band wallet management. The agent pays for what it uses, when it uses it.
+
+---
 
 ## Requirements
 
-- Node 18+
-- A Base wallet with USDC (for the live x402 payments in steps 3 and 4)
+- Node 18+ (TypeScript) or Python 3.10+
+- A Base wallet with a small USDC balance (~$0.01 covers many sandbox runs)
+- `PRIVATE_KEY` and `RECIPIENT_ADDRESS` in `.env`
 
-## Protocol reference
+---
 
-[docs.untitledfinancial.com](https://docs.untitledfinancial.com)
+## Framework examples
+
+| Framework | File |
+|---|---|
+| LangGraph | [`examples/langgraph_agent.py`](./examples/langgraph_agent.py) |
+| CrewAI | [`examples/crewai_agent.py`](./examples/crewai_agent.py) |
+
+---
+
+## Docs
+
+[docs.untitledfinancial.com](https://docs.untitledfinancial.com) · [Agent Quick Start](https://docs.untitledfinancial.com/agent-quickstart) · [x402 reference](https://docs.untitledfinancial.com/integrations/x402) · [MCP tools](https://docs.untitledfinancial.com/integrations/mcp)
